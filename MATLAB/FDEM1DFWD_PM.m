@@ -509,7 +509,7 @@ function y = PM01(lambda,S,mu0,eps0)
     % Output
     %
     
-        y= (exp(-u0.*(S.z+S.height))).*lambda;
+        y= (exp(-u0.* abs(S.z+S.height))).*lambda;
 
 end
 
@@ -529,7 +529,7 @@ function y = PM02(lambda,S,mu0,eps0)
     % Output
     %
     
-        y= (exp(-u0.*(S.z+S.height))).*lambda.^3./u0;
+        y= (exp(-u0.* abs(S.z+S.height))).*lambda.^3./u0;
     
 end
 
