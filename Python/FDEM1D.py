@@ -627,8 +627,8 @@ class Calculate:
         # Define variable u0
         u0 = np.sqrt(L ** 2 - self.Sensor.omega ** 2 * mu_0 * epsilon_0)
 
-        # Output
-        y = (np.exp(-u0 * (self.Sensor.xyz[2] + self.Sensor.height))) * L
+        # Output (abs is used to avoid erroneous results when the receiver is above the transmitter)
+        y = (np.exp(-u0 * abs(self.Sensor.xyz[2] + self.Sensor.height))) * L
 
         return y
 
@@ -642,8 +642,8 @@ class Calculate:
         # Define variable u0
         u0 = np.sqrt(L ** 2 - self.Sensor.omega ** 2 * mu_0 * epsilon_0)
 
-        # Output
-        y = (np.exp(-u0 * (self.Sensor.xyz[2] + self.Sensor.height))) * L ** 3 / u0
+        # Output (abs is used to avoid erroneous results when the receiver is above the transmitter)
+        y = (np.exp(-u0 * abs(self.Sensor.xyz[2] + self.Sensor.height))) * L ** 3 / u0
 
         return y
 
