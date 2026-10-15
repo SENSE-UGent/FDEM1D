@@ -252,9 +252,14 @@ class Calculate:
             SENS_QP: np.array
                 QP sensitivity distribution
 
-            error: float
-                Estimated error on sensitivity
+            error: list of float
+                [IP, QP] maximum absolute estimated truncation error for IP and 
+                QP sensitivity in ppm per unit of perturbed parameter.
         """
+        # FIX: MATLAB version correctly stores one step per layer, 
+        # original Python version overwrites the same variable for each layer, 
+        # leading to incorrect sensitivity calculation as each layer's perturbation 
+        # (derivative) is subsequently divided by the last layer's perturbation.
 
         # Initialize
         nlay = self.original_model(par).size
@@ -263,10 +268,14 @@ class Calculate:
         FWD_IP_n = np.zeros(nlay)
         FWD_QP_n = np.zeros(nlay)
 
+        # preallocate perturbation array
+        perturbations = np.zeros(nlay)
+
         # Get original response
         [FWD_IP_ori, FWD_QP_ori] = self.forward()
 
         # Loop over layer(s)
+ 
         for i in range(nlay):
 
             # Copy original model
@@ -274,6 +283,7 @@ class Calculate:
 
             # Get altered response (forward)
             pert = M_ori[i] * pertFactor
+            perturbations[i] = pert
             M_ori[i] = M_ori[i] + pert
             setattr(self.Model, par, M_ori)  # Set Perturbed profile
             [FWD_IP_p[i], FWD_QP_p[i]] = self.forward()
@@ -288,15 +298,17 @@ class Calculate:
             self.reset_model()
 
         # First derivative
-        SENS_IP = (FWD_IP_p - FWD_IP_ori) / pert
-        SENS_QP = (FWD_QP_p - FWD_QP_ori) / pert
+        SENS_IP = (FWD_IP_p - FWD_IP_ori) / perturbations
+        SENS_QP = (FWD_QP_p - FWD_QP_ori) / perturbations
 
         # Second derivative
-        SENS_IP_sd = (FWD_IP_p - 2 * FWD_IP_ori + FWD_IP_n) / pert ** 2
-        SENS_QP_sd = (FWD_QP_p - 2 * FWD_QP_ori + FWD_QP_n) / pert ** 2
+        SENS_IP_sd = (FWD_IP_p - 2 * FWD_IP_ori + FWD_IP_n) / perturbations ** 2
+        SENS_QP_sd = (FWD_QP_p - 2 * FWD_QP_ori + FWD_QP_n) / perturbations ** 2
 
         # Estimate maximum error
-        error = [np.max(SENS_IP_sd) * pert / 2, np.max(SENS_QP_sd) * pert / 2]
+        error_IP = np.abs(SENS_IP_sd * perturbations) / 2
+        error_QP = np.abs(SENS_QP_sd * perturbations) / 2
+        error = [np.max(error_IP), np.max(error_QP)]
 
         return SENS_IP, SENS_QP, error
 
