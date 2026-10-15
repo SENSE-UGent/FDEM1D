@@ -539,8 +539,8 @@ class Calculate:
         YF = funname(L)
 
         # Calculate output, considering weights and r
-        y = (np.dot(YF[None, :], filter_w[:, None])) / self.Sensor.r
-        y = y[0]  # reduce dimensionality
+        # FIX: shape error via matrix operation (=np.dot) instead of element-wise multiplication
+        y = (YF @ filter_w) / self.Sensor.r
 
         return y
 
