@@ -20,6 +20,7 @@
 
 # Import
 import numpy as np
+import warnings
 import copy
 from scipy.constants import mu_0, epsilon_0
 
@@ -211,10 +212,19 @@ class Calculate:
         """
 
         # Get magnetic fields
-        [H, Hn] = self.magnetic_fields()
+        [H_secondary, H_normalization] = self.magnetic_fields()
 
         # Normalization of magnetic field (ppm)
-        H_rsp = 1e6 * H / Hn
+        # ! normalizer can be zero, which will lead to a division by zero error
+        # breaks the sensitivity() 
+        #  Fix (guard): H_X^0 / H_Y^0 disappear at azimuth arctan(sqrt(2)) ~ 54.74 deg.
+        # Solution warning issue threshold: |H^0| < 1e-3 of the 
+        # coaxial-dipole scale means >1000x amplification of H^S → ppm blows up
+        dipole_scale = abs(self.Sensor.mom) / (4 * np.pi * self.Sensor.r ** 3)
+        if abs(H_normalization) < 1e-3 * dipole_scale:
+            warnings.warn("Normalization field H^0 is near zero for this geometry; ppm values are ill-conditioned.")
+
+        H_rsp = 1e6 * H_secondary / H_normalization
 
         # Get forward response (ppm)
         FWD_IP = np.real(H_rsp)
@@ -314,6 +324,15 @@ class Calculate:
         elif self.Sensor.ori == 'ZY':
 
             # Calculate Hzy (NULL)
+
+            # TODO: adjust Z sign from ↑ (-) to ↓ (+). In Hanssens et al. (2019)
+            # the Z sign is inverted, which is not consistent with the other 
+            # orientations (XZ/YZ).
+            # This is a known issue in the original code and paper (eqs. 7-8). 
+            # The correct sign should be positive for a downward-pointing Z-directed transmitter.
+            # ! the Z↑ convention matches with SimPEG, but not with the 
+            # remainder of this code (XZ/YZ) or empymod. FIX!
+
             H = -self.Sensor.mom / (4 * np.pi) * self.Sensor.xyz[1] / \
                 self.Sensor.r * self.digital_filter(self.rTEn2, 1)
             Hn = self.Sensor.mom / (4 * np.pi) * self.digital_filter(self.rTE02, 0)
@@ -321,6 +340,15 @@ class Calculate:
         elif self.Sensor.ori == 'ZX':
 
             # Calculate Hzx (PRP)
+
+            # TODO: adjust Z sign from ↑ (-) to ↓ (+). In Hanssens et al. (2019)
+            # the Z sign is inverted, which is not consistent with the other 
+            # orientations (XZ/YZ).
+            # This is a known issue in the original code and paper (eqs. 7-8). 
+            # The correct sign should be positive for a downward-pointing Z-directed transmitter.
+            # ! the Z↑ convention matches with SimPEG, but not with the 
+            # remainder of this code (XZ/YZ) or empymod. FIX!
+
             H = -self.Sensor.mom / (4 * np.pi) * self.Sensor.xyz[0] / \
                 self.Sensor.r * self.digital_filter(self.rTEn2, 1)
             Hn = self.Sensor.mom / (4 * np.pi) * self.digital_filter(self.rTE02, 0)
