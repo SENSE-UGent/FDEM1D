@@ -114,10 +114,10 @@ class Model:
                 Dielectric permittivity of layer(s) (S/m)
         """
 
-        self.thick = np.array(thick)                              # Layer(s) thickness (m)
-        self.sus = np.array(sus)                                  # Susceptibility of layer(s) (-)
-        self.perm = np.array(perm)                                # Permittivity of layer(s) (F/m)
-        self.con = np.array(con)                                  # Conductivity of layer(s) (S/m)
+        self.thick = np.array(thick, dtype=float)                              # Layer(s) thickness (m)
+        self.sus = np.array(sus, dtype=float)                                  # Susceptibility of layer(s) (-)
+        self.perm = np.array(perm, dtype=float)                                # Permittivity of layer(s) (F/m)
+        self.con = np.array(con, dtype=float)                                  # Conductivity of layer(s) (S/m)
 
     @property
     def depth(self):
@@ -150,6 +150,12 @@ class Model:
 #                                                       1D  MODELLING                                                  #
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 class Calculate:
+    # Absolute lower bound of the perturbation step per parameter (in units of the parameter)
+    # Used when the relative step pertFactor * |m_n| is smaller (e.g. m_n = 0). (with m_n the unperturbed parameter value of layer n) 
+    # With pertFactor = 1e-2, the relative perturbation step is unchanged are unchanged for con >= 1e-4 S/m, 
+    # |sus| >= 1e-5 and perm >= epsilon_0
+    DEFAULT_ABS_STEP = {'con': 1e-6, 'sus': 1e-7, 'perm': 1e-2 * epsilon_0}
+
     def __init__(self, Sensor, Model, method='RC'):
         """
             Set FDEM (1D) characteristics and methods
@@ -215,9 +221,7 @@ class Calculate:
         [H_secondary, H_normalization] = self.magnetic_fields()
 
         # Normalization of magnetic field (ppm)
-        # ! normalizer can be zero, which will lead to a division by zero error
-        # breaks the sensitivity() 
-        #  Fix (guard): H_X^0 / H_Y^0 disappear at azimuth arctan(sqrt(2)) ~ 54.74 deg.
+        # Guard: H_X^0 / H_Y^0 disappear at azimuth arctan(sqrt(2)) ~ 54.74 deg.
         # Solution warning issue threshold: |H^0| < 1e-3 of the 
         # coaxial-dipole scale means >1000x amplification of H^S → ppm blows up
         dipole_scale = abs(self.Sensor.mom) / (4 * np.pi * self.Sensor.r ** 3)
@@ -232,7 +236,7 @@ class Calculate:
 
         return FWD_IP, FWD_QP
 
-    def sensitivity(self, par, pertFactor=1e-2):
+    def sensitivity(self, par, pertFactor=1e-2, absStep=None):
         """
             Calculate the sensitivity distribution of a given layered half-space and loop-loop configuration
 
@@ -242,7 +246,12 @@ class Calculate:
                 Sensitivity of physical property ('con','sus','perm')
 
             pertFactor: float
-                Perturbation factor (default: 1e-2)
+                Relative perturbation factor (default: 1e-2)
+
+            absStep: float, optional
+                Minimum absolute perturbation step (units of par). Default: DEFAULT_ABS_STEP[par]
+                (con: 1e-6 S/m, sus: 1e-7, perm: 1e-2 * epsilon_0 F/m).
+                Step per layer: Delta m_n = sign(m_n) * max(pertFactor * |m_n|, absStep), sign(0) = +1.
 
             Returns
             -------
@@ -256,11 +265,19 @@ class Calculate:
                 [IP, QP] maximum absolute estimated truncation error for IP and 
                 QP sensitivity in ppm per unit of perturbed parameter.
         """
-        # FIX: MATLAB version correctly stores one step per layer, 
-        # original Python version overwrites the same variable for each layer, 
-        # leading to incorrect sensitivity calculation as each layer's perturbation 
-        # (derivative) is subsequently divided by the last layer's perturbation.
 
+        pertFactor = float(pertFactor) # set for error handling
+
+        # Validate inputs
+        if par not in self.DEFAULT_ABS_STEP:
+            raise ValueError(f"par must be one of {list(self.DEFAULT_ABS_STEP)}, got {par!r}")
+        abs_step = self.DEFAULT_ABS_STEP[par] if absStep is None else float(absStep)
+        if not np.isfinite(abs_step) or abs_step <= 0:
+            raise ValueError("absStep must be finite and > 0")
+        if not np.isfinite(pertFactor) or pertFactor <= 0:
+            raise ValueError("pertFactor must be finite and > 0")
+        
+        
         # Initialize
         nlay = self.original_model(par).size
         FWD_IP_p = np.zeros(nlay)
@@ -275,21 +292,25 @@ class Calculate:
         [FWD_IP_ori, FWD_QP_ori] = self.forward()
 
         # Loop over layer(s)
- 
+        # One step per layer Delta m_n = sign(m_n) * max(pertFactor * |m_n|, absStep); 
+        # each derivative uses its own step (eq. 33)
         for i in range(nlay):
 
-            # Copy original model
-            M_ori = copy.deepcopy(self.original_model(par))
+            # Float copy original model (prevents truncation of integer input)
+            M_ori = np.array(self.original_model(par), dtype=float) 
+
+            # Perturbation step: relative, with an absolute floor (finite for m_n = 0)
+            direction = -1.0 if M_ori[i] < 0 else 1.0
+            pert = direction * max(pertFactor * abs(M_ori[i]), abs_step)
+            perturbations[i] = pert
 
             # Get altered response (forward)
-            pert = M_ori[i] * pertFactor
-            perturbations[i] = pert
             M_ori[i] = M_ori[i] + pert
             setattr(self.Model, par, M_ori)  # Set Perturbed profile
             [FWD_IP_p[i], FWD_QP_p[i]] = self.forward()
 
             # Get altered response (backward)
-            M_ori = copy.deepcopy(self.original_model(par))
+            M_ori = np.array(self.original_model(par), dtype=float)
             M_ori[i] = M_ori[i] - pert
             setattr(self.Model, par, M_ori)  # Set Perturbed profile
             [FWD_IP_n[i], FWD_QP_n[i]] = self.forward()
